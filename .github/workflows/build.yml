@@ -1,0 +1,54 @@
+name: Build ReShadeEffectToggler
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  COMMONLIB_REPO: https://github.com/alandtse/CommonLibVR.git
+  COMMONLIB_REF: 94faaed            # CommonLibSSE-NG 11.0.0 (Skyrim 1.7.99 / 1.7.104, Address Library V5)
+  GLAZE_REF: v4.4.3                 # last glaze release that still ships glaze/json/json_t.hpp
+  VCPKG_COMMIT: 00c5775211f45cd08b37fce0484b4cb940e422ab
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch dependencies
+        shell: bash
+        run: |
+          git clone --branch ng ${COMMONLIB_REPO} extern/CommonLibSSE-NG
+          git -C extern/CommonLibSSE-NG checkout ${COMMONLIB_REF}
+          git -C extern/CommonLibSSE-NG submodule update --init --recursive
+          git clone --depth 1 --branch ${GLAZE_REF} https://github.com/stephenberry/glaze.git extern/glaze
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          git -C vcpkg checkout ${VCPKG_COMMIT}
+          ./vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          echo "VCPKG_ROOT=${GITHUB_WORKSPACE}/vcpkg" >> $GITHUB_ENV
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: cmake --preset release
+
+      - name: Build
+        run: cmake --build build/release --config Release
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/SKSE/Plugins dist/Scripts/Source
+          cp build/release/ReShadeEffectToggler.dll dist/SKSE/Plugins/
+          cp build/release/ReShadeEffectToggler.pdb dist/SKSE/Plugins/ || true
+          cp config/ReShadeEffectToggler.ini dist/SKSE/Plugins/
+          cp Scripts/ReShadeEffectToggler.pex dist/Scripts/
+          cp Scripts/Source/ReShadeEffectToggler.psc dist/Scripts/Source/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReShadeEffectToggler-4.0.1-SKSE-2.3.x
+          path: dist
