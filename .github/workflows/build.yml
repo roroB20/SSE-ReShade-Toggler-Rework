@@ -62,7 +62,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          if ! cmake --build build/release --config Release 2>&1 | tee build.log; then
+          if ! cmake --build build/release --config Release -- -k 0 2>&1 | tee build.log; then
             # Surface compiler errors as annotations (readable without log access)
             grep -E "error|Error|FAILED" build.log | grep -v "^\s*$" | head -n 60 > errs.txt || true
             i=0
