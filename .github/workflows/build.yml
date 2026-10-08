@@ -9,6 +9,7 @@ env:
   COMMONLIB_REF: 94faaed            # CommonLibSSE-NG 11.0.0 (Skyrim 1.7.99 / 1.7.104, Address Library V5)
   GLAZE_REF: v4.4.3                 # last glaze release that still ships glaze/json/json_t.hpp
   VCPKG_COMMIT: 00c5775211f45cd08b37fce0484b4cb940e422ab
+  VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg_cache,readwrite"
 
 jobs:
   build:
@@ -26,17 +27,52 @@ jobs:
           git clone https://github.com/microsoft/vcpkg.git vcpkg
           git -C vcpkg checkout ${VCPKG_COMMIT}
           ./vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          mkdir -p vcpkg_cache
           echo "VCPKG_ROOT=${GITHUB_WORKSPACE}/vcpkg" >> $GITHUB_ENV
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vcpkg_cache
+          key: vcpkg-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: vcpkg-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}-
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
       - name: Configure
-        run: cmake --preset release
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! cmake --preset release 2>&1 | tee configure.log; then
+            msg=$(tail -n 80 configure.log | head -c 60000 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=configure::${msg}"
+            exit 1
+          fi
+
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg_cache
+          key: vcpkg-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
 
       - name: Build
-        run: cmake --build build/release --config Release
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! cmake --build build/release --config Release 2>&1 | tee build.log; then
+            # Surface compiler errors as annotations (readable without log access)
+            grep -E "error|Error|FAILED" build.log | grep -v "^\s*$" | head -n 60 > errs.txt || true
+            i=0
+            while IFS= read -r line; do
+              i=$((i+1)); [ $i -le 9 ] && echo "::error title=build-$i::${line:0:1500}"
+            done < errs.txt
+            msg=$(head -c 60000 errs.txt | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=build-all::${msg}"
+            exit 1
+          fi
 
       - name: Package
         shell: bash
